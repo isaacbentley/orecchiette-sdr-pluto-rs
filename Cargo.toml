@@ -1,6 +1,6 @@
 [package]
 name = "orecchiette-sdr-pluto-rs"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Analog Devices ADALM-Pluto (PlutoSDR) implementation of the SdrSource trait."
 license = "GPL-3.0-or-later"
