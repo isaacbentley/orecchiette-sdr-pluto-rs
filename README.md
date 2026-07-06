@@ -1,26 +1,26 @@
-# 📻 orecchiette-sdr-pluto-rs: ADALM-Pluto Interface
+# orecchiette-sdr-pluto-rs
 
 [![CI](https://github.com/isaacbentley/orecchiette-sdr-pluto-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/isaacbentley/orecchiette-sdr-pluto-rs/actions/workflows/ci.yml)
-[![MSRV](https://img.shields.io/badge/rustc-1.85+-ab6000.svg)](https://blog.rust-lang.org/2025/02/20/Rust-1.85.0.html)
+[![License: GPL-3.0-or-later](https://img.shields.io/github/license/isaacbentley/orecchiette-sdr-pluto-rs.svg)](https://choosealicense.com/licenses/gpl-3.0/)
 
-Analog Devices ADALM-Pluto (PlutoSDR) implementation of the [`SdrSource`](https://github.com/isaacbentley/orecchiette-sdr-source-rs) trait. This crate seamlessly integrates the PlutoSDR into the SDR detection applications orchestrator, leveraging the `industrial-io` crate which wraps the `libiio` C library.
+Analog Devices ADALM-Pluto (PlutoSDR) implementation of the [`SdrSource`](https://github.com/isaacbentley/orecchiette-sdr-source-rs) trait, leveraging the `industrial-io` crate which wraps the `libiio` C library.
 
-## 🎯 **Why orecchiette-sdr-pluto-rs?**
+## Overview
 
 The PlutoSDR provides full-duplex operation and is extremely cost-effective. By using the official `libiio` library via `industrial-io`, this backend supports high-speed data capture over both USB and Gigabit Ethernet (via a USB-to-Ethernet adapter).
 
-## 🚀 **Features**
+## Key Features
 
-### **⚡ Advanced Device Control**
 - **Dynamic Configuration**: Automatically discovers and configures the AD9361 PHY and RX channels based on your requested parameters.
 - **Hardware Gain**: Full control over manual baseband gain (0–73 dB).
 - **Adaptive Channel Hopping**: Modifies the `altvoltage0` (RX LO) IIO attribute on the fly, allowing extremely fast retuning without tearing down the stream.
 
-## 📦 **Installation**
+## Installation
 
-Because this crate relies on `libiio`, it is restricted to macOS and Linux by default and placed behind a feature flag in the main orchestrator to prevent build breaks on Windows.
+This crate relies on `libiio`, so it is restricted to macOS and Linux.
 
 ### System Prerequisites
+
 You must install the `libiio` C library before building this crate.
 - **Ubuntu/Debian**: `sudo apt install libiio-dev`
 - **macOS**: `libiio` must be built from source as it is not available in Homebrew. Additionally, because the `libiio-sys` Rust bindings search for `iio.framework` in specific architecture-dependent directories, you must copy the built framework to the expected path:
@@ -40,13 +40,15 @@ You must install the `libiio` C library before building this crate.
   cp -R build/iio.framework /usr/local/Frameworks/
   ```
 
-Add to your `Cargo.toml`:
+Add the following to your `Cargo.toml`:
+
 ```toml
 [dependencies]
-orecchiette-sdr-pluto-rs = { git = "https://github.com/isaacbentley/orecchiette-sdr-pluto-rs.git", branch = "main" }
+orecchiette-sdr-pluto-rs = "0.1.0"
+orecchiette-sdr-source-rs = "0.1.0"
 ```
 
-## 🔧 **Usage**
+## Usage
 
 ```rust,no_run
 use orecchiette_sdr_pluto_rs::PlutoSource;
@@ -81,10 +83,19 @@ for packet in handle.receiver.iter() {
 }
 ```
 
-## 📚 **Documentation**
+## MSRV & Semver Policy
+
+- **MSRV:** This crate does not maintain an explicit Minimum Supported Rust Version (MSRV) policy and tracks the latest `stable` compiler.
+- **Semver:** This crate follows semantic versioning. While in `0.x.y`, breaking API changes will result in a minor version bump (e.g. `0.1.x` to `0.2.0`).
+
+## Testing & Contributing
+
+Please see [CONTRIBUTING.md](CONTRIBUTING.md) for detailed instructions on running the test suite and formatting your code before submitting a Pull Request.
+
+## Documentation
 
 - [Architecture & Design](DESIGN.md) — internal architecture and execution flow.
 
-## 📄 **License**
+## License
 
-Licensed under the GNU General Public License v3.0 or later (GPL-3.0-or-later) - see the [LICENSE](../../LICENSE) file.
+This project is licensed under the GNU General Public License v3.0 or later (GPL-3.0-or-later) - see the [LICENSE](LICENSE) file for details.
