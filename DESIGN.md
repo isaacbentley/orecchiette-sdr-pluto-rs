@@ -1,6 +1,6 @@
-# Design: ADALM-Pluto Interface (sdr-pluto-rs)
+# Design: ADALM-Pluto Interface (orecchiette-sdr-pluto-rs)
 
-This document outlines the architecture of the `sdr-pluto-rs` crate, which provides hardware integration for the Analog Devices ADALM-Pluto (PlutoSDR) using the Linux Industrial I/O (IIO) framework.
+This document outlines the architecture of the `orecchiette-sdr-pluto-rs` crate, which provides hardware integration for the Analog Devices ADALM-Pluto (PlutoSDR) using the Linux Industrial I/O (IIO) framework.
 
 ## 1. Introduction
 

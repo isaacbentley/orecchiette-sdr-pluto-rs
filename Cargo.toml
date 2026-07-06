@@ -1,5 +1,5 @@
 [package]
-name = "sdr-pluto-rs"
+name = "orecchiette-sdr-pluto-rs"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
@@ -8,7 +8,7 @@ description = "Analog Devices ADALM-Pluto (PlutoSDR) implementation of the SdrSo
 license = "GPL-3.0-or-later"
 
 [dependencies]
-sdr-source-rs = { git = "https://github.com/isaacbentley/sdr-source-rs.git", branch = "main" }
+orecchiette-sdr-source-rs = { git = "https://github.com/isaacbentley/orecchiette-sdr-source-rs.git", branch = "main" }
 industrial-io = "0.6"
 crossbeam = "0.8"
 num-complex = "0.4"

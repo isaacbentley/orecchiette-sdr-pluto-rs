@@ -4,7 +4,7 @@
 use crossbeam::channel;
 use industrial_io::{Context, Direction};
 use num_complex::Complex32;
-use sdr_source_rs::{
+use orecchiette_sdr_source_rs::{
     DwellAdvice, DwellController, IqPacket, SdrError, SdrHandle, SdrSource, SourceConfig,
     freq_key_khz,
 };
@@ -261,7 +261,7 @@ impl SdrSource for PlutoSource {
                         }
 
                         let pkt = IqPacket {
-                            samples: sdr_source_rs::PooledIqBuffer::new_pooled(
+                            samples: orecchiette_sdr_source_rs::PooledIqBuffer::new_pooled(
                                 samples,
                                 pool_tx.clone(),
                             ),

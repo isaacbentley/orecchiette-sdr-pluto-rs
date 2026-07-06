@@ -1,11 +1,11 @@
-# 📻 sdr-pluto-rs: ADALM-Pluto Interface
+# 📻 orecchiette-sdr-pluto-rs: ADALM-Pluto Interface
 
-[![CI](https://github.com/isaacbentley/sdr-pluto-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/isaacbentley/sdr-pluto-rs/actions/workflows/ci.yml)
+[![CI](https://github.com/isaacbentley/orecchiette-sdr-pluto-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/isaacbentley/orecchiette-sdr-pluto-rs/actions/workflows/ci.yml)
 [![MSRV](https://img.shields.io/badge/rustc-1.85+-ab6000.svg)](https://blog.rust-lang.org/2025/02/20/Rust-1.85.0.html)
 
-Analog Devices ADALM-Pluto (PlutoSDR) implementation of the [`SdrSource`](https://github.com/isaacbentley/sdr-source-rs) trait. This crate seamlessly integrates the PlutoSDR into the SDR detection applications orchestrator, leveraging the `industrial-io` crate which wraps the `libiio` C library.
+Analog Devices ADALM-Pluto (PlutoSDR) implementation of the [`SdrSource`](https://github.com/isaacbentley/orecchiette-sdr-source-rs) trait. This crate seamlessly integrates the PlutoSDR into the SDR detection applications orchestrator, leveraging the `industrial-io` crate which wraps the `libiio` C library.
 
-## 🎯 **Why sdr-pluto-rs?**
+## 🎯 **Why orecchiette-sdr-pluto-rs?**
 
 The PlutoSDR provides full-duplex operation and is extremely cost-effective. By using the official `libiio` library via `industrial-io`, this backend supports high-speed data capture over both USB and Gigabit Ethernet (via a USB-to-Ethernet adapter).
 
@@ -43,14 +43,14 @@ You must install the `libiio` C library before building this crate.
 Add to your `Cargo.toml`:
 ```toml
 [dependencies]
-sdr-pluto-rs = { git = "https://github.com/isaacbentley/sdr-pluto-rs.git", branch = "main" }
+orecchiette-sdr-pluto-rs = { git = "https://github.com/isaacbentley/orecchiette-sdr-pluto-rs.git", branch = "main" }
 ```
 
 ## 🔧 **Usage**
 
 ```rust,no_run
-use sdr_pluto_rs::PlutoSource;
-use sdr_source_rs::{DwellAdvice, SdrSource, SourceConfig};
+use orecchiette_sdr_pluto_rs::PlutoSource;
+use orecchiette_sdr_source_rs::{DwellAdvice, SdrSource, SourceConfig};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
