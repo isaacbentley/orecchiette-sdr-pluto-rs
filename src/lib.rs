@@ -54,6 +54,9 @@ impl SdrSource for PlutoSource {
         if config.channels_hz.is_empty() {
             return Err(SdrError::BadConfig("channels_hz must not be empty".into()));
         }
+        if config.sample_rate_hz <= 0.0 {
+            return Err(SdrError::BadConfig("sample_rate_hz must be > 0".into()));
+        }
 
         if config.sample_rate_hz > PLUTO_MAX_RELIABLE_RATE_HZ {
             warn!(
@@ -124,8 +127,8 @@ impl SdrSource for PlutoSource {
             .create_buffer(32768, false)
             .map_err(|e| SdrError::BadConfig(format!("Failed to create IIO buffer: {:?}", e)))?;
 
-        let (pool_tx, pool_rx) = crossbeam::channel::bounded::<Vec<Complex32>>(256);
-        for _ in 0..256 {
+        let (pool_tx, pool_rx) = crossbeam::channel::bounded::<Vec<Complex32>>(1024);
+        for _ in 0..1024 {
             let _ = pool_tx.send(Vec::with_capacity(32768));
         }
 
@@ -159,139 +162,154 @@ impl SdrSource for PlutoSource {
 
         #[allow(clippy::redundant_closure_call)]
         let capture_thread = thread::spawn(move || {
-            if let Err(e) = (move || -> Result<(), anyhow::Error> {
-                let _ctx = w_ctx.into_inner();
-                let _phy = w_phy.into_inner();
-                let _rx = w_rx.into_inner();
-                let mut buffer = w_buffer.into_inner();
-                let rx_lo = w_rx_lo.into_inner();
-                let rx_i = w_rx_i.into_inner();
-                let rx_q = w_rx_q.into_inner();
+            let panic_res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                if let Err(e) = (move || -> Result<(), anyhow::Error> {
+                    let _ctx = w_ctx.into_inner();
+                    let _phy = w_phy.into_inner();
+                    let _rx = w_rx.into_inner();
+                    let mut buffer = w_buffer.into_inner();
+                    let rx_lo = w_rx_lo.into_inner();
+                    let rx_i = w_rx_i.into_inner();
+                    let rx_q = w_rx_q.into_inner();
 
-                let mut channel_idx = 0usize;
-                let mut last_report = Instant::now();
-                let mut channel_switches = 0u64;
-                let mut last_freq_hz: Option<f64> = None;
+                    let mut channel_idx = 0usize;
+                    let mut last_report = Instant::now();
+                    let mut channel_switches = 0u64;
+                    let mut last_freq_hz: Option<f64> = None;
+                    let mut consecutive_failures = 0;
 
-                // Expected time to fill one 32k buffer
-                let expected_duration = Duration::from_secs_f64(32768.0 / sample_rate_f32 as f64);
-                // libiio typically uses 4 kernel buffers. If we lag by more than 3 buffers' worth of time,
-                // the kernel ring has overflowed and dropped samples.
-                let max_lag = expected_duration * 3;
+                    // Expected time to fill one 32k buffer
+                    let expected_duration = Duration::from_secs_f64(32768.0 / sample_rate_f32 as f64);
+                    // libiio typically uses 4 kernel buffers. If we lag by more than 3 buffers' worth of time,
+                    // the kernel ring has overflowed and dropped samples.
+                    let max_lag = expected_duration * 3;
 
-                'outer: loop {
-                    if stop_flag_thread.load(Ordering::SeqCst) {
-                        break;
-                    }
-
-                    let current_freq_hz = channels_hz[channel_idx];
-                    let freq_key = freq_key_khz(current_freq_hz);
-
-                    if last_freq_hz != Some(current_freq_hz) {
-                        if let Err(e) = rx_lo.attr_write("frequency", current_freq_hz as i64) {
-                            warn!("[pluto] Failed to retune to {}: {:?}", current_freq_hz, e);
-                            channel_idx = (channel_idx + 1) % num_channels;
-                            channel_switches += 1;
-                            continue;
-                        }
-                        last_freq_hz = Some(current_freq_hz);
-                    }
-
-                    if num_channels > 1 {
-                        thread::sleep(Duration::from_millis(5));
-                    }
-
-                    let dwell_start = Instant::now();
-                    let mut first_refill = true;
-                    let mut last_refill_time = Instant::now();
-
-                    loop {
+                    'outer: loop {
                         if stop_flag_thread.load(Ordering::SeqCst) {
-                            break 'outer;
-                        }
-
-                        let latest_signal = advice_thread.latest_signal_at(freq_key);
-                        let deadline = dwell_controller.deadline(dwell_start, latest_signal);
-                        if Instant::now() >= deadline {
                             break;
                         }
 
-                        if let Err(e) = buffer.refill() {
-                            warn!("[pluto] Buffer refill error: {:?}", e);
-                            thread::sleep(Duration::from_millis(1));
-                            last_refill_time = Instant::now();
-                            continue;
+                        if consecutive_failures >= num_channels {
+                            warn!("[pluto] All channels failed to tune consecutively. Sleeping for 500ms before retrying.");
+                            thread::sleep(Duration::from_millis(500));
+                            consecutive_failures = 0;
                         }
 
-                        let now = Instant::now();
-                        let overrun = if first_refill {
-                            first_refill = false;
-                            false
-                        } else {
-                            now.duration_since(last_refill_time) > max_lag
-                        };
-                        last_refill_time = now;
+                        let current_freq_hz = channels_hz[channel_idx];
+                        let freq_key = freq_key_khz(current_freq_hz);
 
-                        let i_data = match rx_i.read::<i16>(&buffer) {
-                            Ok(data) => data,
-                            Err(e) => {
-                                warn!("[pluto] Failed to read I channel: {:?}", e);
+                        if last_freq_hz != Some(current_freq_hz) {
+                            if let Err(e) = rx_lo.attr_write("frequency", current_freq_hz as i64) {
+                                warn!("[pluto] Failed to retune to {}: {:?}", current_freq_hz, e);
+                                consecutive_failures += 1;
+                                channel_idx = (channel_idx + 1) % num_channels;
+                                channel_switches += 1;
                                 continue;
                             }
-                        };
-                        let q_data = match rx_q.read::<i16>(&buffer) {
-                            Ok(data) => data,
-                            Err(e) => {
-                                warn!("[pluto] Failed to read Q channel: {:?}", e);
+                            last_freq_hz = Some(current_freq_hz);
+                        }
+
+                        consecutive_failures = 0;
+
+                        if num_channels > 1 {
+                            thread::sleep(Duration::from_millis(5));
+                        }
+
+                        let dwell_start = Instant::now();
+                        let mut first_refill = true;
+                        let mut last_refill_time = Instant::now();
+
+                        loop {
+                            if stop_flag_thread.load(Ordering::SeqCst) {
+                                break 'outer;
+                            }
+
+                            let latest_signal = advice_thread.latest_signal_at(freq_key);
+                            let deadline = dwell_controller.deadline(dwell_start, latest_signal);
+                            if Instant::now() >= deadline {
+                                break;
+                            }
+
+                            if let Err(e) = buffer.refill() {
+                                warn!("[pluto] Buffer refill error: {:?}", e);
+                                thread::sleep(Duration::from_millis(1));
+                                last_refill_time = Instant::now();
                                 continue;
                             }
-                        };
 
-                        if i_data.len() != q_data.len() {
-                            warn!("[pluto] I/Q length mismatch");
-                            continue;
+                            let now = Instant::now();
+                            let overrun = if first_refill {
+                                first_refill = false;
+                                false
+                            } else {
+                                now.duration_since(last_refill_time) > max_lag
+                            };
+                            last_refill_time = now;
+
+                            let i_data = match rx_i.read::<i16>(&buffer) {
+                                Ok(data) => data,
+                                Err(e) => {
+                                    warn!("[pluto] Failed to read I channel: {:?}", e);
+                                    continue;
+                                }
+                            };
+                            let q_data = match rx_q.read::<i16>(&buffer) {
+                                Ok(data) => data,
+                                Err(e) => {
+                                    warn!("[pluto] Failed to read Q channel: {:?}", e);
+                                    continue;
+                                }
+                            };
+
+                            if i_data.len() != q_data.len() {
+                                warn!("[pluto] I/Q length mismatch");
+                                continue;
+                            }
+
+                            let mut samples = pool_rx
+                                .try_recv()
+                                .unwrap_or_else(|_| Vec::with_capacity(i_data.len()));
+                            samples.clear();
+                            for (i, q) in i_data.into_iter().zip(q_data) {
+                                samples.push(Complex32::new((i as f32) / 2048.0, (q as f32) / 2048.0));
+                            }
+
+                            let pkt = IqPacket {
+                                samples: orecchiette_sdr_source_rs::PooledIqBuffer::new_pooled(
+                                    samples,
+                                    pool_tx.clone(),
+                                ),
+                                center_frequency_hz: current_freq_hz,
+                                sample_rate_hz: sample_rate_f32,
+                                overrun,
+                            };
+
+                            if tx.send(pkt).is_err() {
+                                break 'outer;
+                            }
+
+                            if last_report.elapsed() >= Duration::from_secs(60) {
+                                let rate =
+                                    channel_switches as f32 / last_report.elapsed().as_secs_f32();
+                                info!(
+                                    "[pluto] Scanning speed: {:.1} ch/s | Pool size: {} channels",
+                                    rate, num_channels
+                                );
+                                channel_switches = 0;
+                                last_report = Instant::now();
+                            }
                         }
 
-                        let mut samples = pool_rx
-                            .try_recv()
-                            .unwrap_or_else(|_| Vec::with_capacity(i_data.len()));
-                        samples.clear();
-                        for (i, q) in i_data.into_iter().zip(q_data) {
-                            samples.push(Complex32::new((i as f32) / 2048.0, (q as f32) / 2048.0));
-                        }
-
-                        let pkt = IqPacket {
-                            samples: orecchiette_sdr_source_rs::PooledIqBuffer::new_pooled(
-                                samples,
-                                pool_tx.clone(),
-                            ),
-                            center_frequency_hz: current_freq_hz,
-                            sample_rate_hz: sample_rate_f32,
-                            overrun,
-                        };
-
-                        if tx.send(pkt).is_err() {
-                            break 'outer;
-                        }
-
-                        if last_report.elapsed() >= Duration::from_secs(60) {
-                            let rate =
-                                channel_switches as f32 / last_report.elapsed().as_secs_f32();
-                            info!(
-                                "[pluto] Scanning speed: {:.1} ch/s | Pool size: {} channels",
-                                rate, num_channels
-                            );
-                            channel_switches = 0;
-                            last_report = Instant::now();
-                        }
+                        channel_idx = (channel_idx + 1) % num_channels;
+                        channel_switches += 1;
                     }
-
-                    channel_idx = (channel_idx + 1) % num_channels;
-                    channel_switches += 1;
+                    Ok(())
+                })() {
+                    tracing::error!("[pluto] Capture thread failed: {:?}", e);
                 }
-                Ok(())
-            })() {
-                tracing::error!("[pluto] Capture thread failed: {:?}", e);
+            }));
+            if let Err(e) = panic_res {
+                tracing::error!("[pluto] Capture thread panicked: {:?}", e);
             }
         });
 
