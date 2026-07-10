@@ -179,7 +179,8 @@ impl SdrSource for PlutoSource {
                     let mut consecutive_failures = 0;
 
                     // Expected time to fill one 32k buffer
-                    let expected_duration = Duration::from_secs_f64(32768.0 / sample_rate_f32 as f64);
+                    let expected_duration =
+                        Duration::from_secs_f64(32768.0 / sample_rate_f32 as f64);
                     // libiio typically uses 4 kernel buffers. If we lag by more than 3 buffers' worth of time,
                     // the kernel ring has overflowed and dropped samples.
                     let max_lag = expected_duration * 3;
@@ -190,7 +191,9 @@ impl SdrSource for PlutoSource {
                         }
 
                         if consecutive_failures >= num_channels {
-                            warn!("[pluto] All channels failed to tune consecutively. Sleeping for 500ms before retrying.");
+                            warn!(
+                                "[pluto] All channels failed to tune consecutively. Sleeping for 500ms before retrying."
+                            );
                             thread::sleep(Duration::from_millis(500));
                             consecutive_failures = 0;
                         }
@@ -271,7 +274,8 @@ impl SdrSource for PlutoSource {
                                 .unwrap_or_else(|_| Vec::with_capacity(i_data.len()));
                             samples.clear();
                             for (i, q) in i_data.into_iter().zip(q_data) {
-                                samples.push(Complex32::new((i as f32) / 2048.0, (q as f32) / 2048.0));
+                                samples
+                                    .push(Complex32::new((i as f32) / 2048.0, (q as f32) / 2048.0));
                             }
 
                             let pkt = IqPacket {
