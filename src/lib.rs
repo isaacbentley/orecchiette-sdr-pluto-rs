@@ -16,6 +16,19 @@ use tracing::{info, warn};
 
 pub const PLUTO_MAX_RELIABLE_RATE_HZ: f64 = 5_000_000.0;
 
+/// After this many consecutive full sweeps where every channel fails
+/// to tune/stream (each sweep followed by a 500ms backoff sleep), give
+/// up on the device rather than retrying forever — a Pluto that's been
+/// unplugged or wedged should surface as a terminal error instead of
+/// spinning silently.
+const MAX_CONSECUTIVE_SWEEP_FAILURES: u32 = 10;
+
+/// After this many consecutive `buffer.refill()` failures on the same
+/// channel (each followed by a 1ms sleep, so ~200ms total), give up on
+/// this dwell and move to the next channel rather than spinning at
+/// ~1kHz forever.
+const MAX_CONSECUTIVE_REFILL_FAILURES: u32 = 200;
+
 struct SendWrapper<T>(T);
 
 // SAFETY: libiio objects are created on the caller thread, moved once, and accessed
@@ -45,20 +58,30 @@ impl Default for PlutoSource {
     }
 }
 
+/// Validate `SourceConfig` and report whether the requested rate
+/// exceeds Pluto's typical reliable ceiling (Pluto doesn't clamp like
+/// the HackRF backend — it's a warning, not a hard limit). Kept
+/// standalone (no hardware access) so it's unit-testable ahead of
+/// `Context::from_uri`.
+fn validate_pluto_config(num_channels: usize, sample_rate_hz: f64) -> Result<bool, SdrError> {
+    if num_channels == 0 {
+        return Err(SdrError::BadConfig("channels_hz must not be empty".into()));
+    }
+    if sample_rate_hz <= 0.0 {
+        return Err(SdrError::BadConfig("sample_rate_hz must be > 0".into()));
+    }
+    Ok(sample_rate_hz > PLUTO_MAX_RELIABLE_RATE_HZ)
+}
+
 impl SdrSource for PlutoSource {
     fn start(
         self: Box<Self>,
         config: SourceConfig,
         advice: Arc<dyn DwellAdvice>,
     ) -> Result<SdrHandle, SdrError> {
-        if config.channels_hz.is_empty() {
-            return Err(SdrError::BadConfig("channels_hz must not be empty".into()));
-        }
-        if config.sample_rate_hz <= 0.0 {
-            return Err(SdrError::BadConfig("sample_rate_hz must be > 0".into()));
-        }
-
-        if config.sample_rate_hz > PLUTO_MAX_RELIABLE_RATE_HZ {
+        let exceeds_reliable_rate =
+            validate_pluto_config(config.channels_hz.len(), config.sample_rate_hz)?;
+        if exceeds_reliable_rate {
             warn!(
                 "[pluto] Requested {:.2} MSPS might cause overruns over USB/Network. Typical reliable limit is ~5 MSPS.",
                 config.sample_rate_hz / 1e6
@@ -177,6 +200,7 @@ impl SdrSource for PlutoSource {
                     let mut channel_switches = 0u64;
                     let mut last_freq_hz: Option<f64> = None;
                     let mut consecutive_failures = 0;
+                    let mut consecutive_sweep_failures = 0;
 
                     // Expected time to fill one 32k buffer
                     let expected_duration =
@@ -191,6 +215,14 @@ impl SdrSource for PlutoSource {
                         }
 
                         if consecutive_failures >= num_channels {
+                            consecutive_sweep_failures += 1;
+                            if consecutive_sweep_failures >= MAX_CONSECUTIVE_SWEEP_FAILURES {
+                                tracing::error!(
+                                    "[pluto] All channels failed for {} consecutive sweeps. Giving up — is the Pluto still connected?",
+                                    consecutive_sweep_failures
+                                );
+                                break 'outer;
+                            }
                             warn!(
                                 "[pluto] All channels failed to tune consecutively. Sleeping for 500ms before retrying."
                             );
@@ -213,6 +245,7 @@ impl SdrSource for PlutoSource {
                         }
 
                         consecutive_failures = 0;
+                        consecutive_sweep_failures = 0;
 
                         if num_channels > 1 {
                             thread::sleep(Duration::from_millis(5));
@@ -221,6 +254,7 @@ impl SdrSource for PlutoSource {
                         let dwell_start = Instant::now();
                         let mut first_refill = true;
                         let mut last_refill_time = Instant::now();
+                        let mut consecutive_refill_failures = 0u32;
 
                         loop {
                             if stop_flag_thread.load(Ordering::SeqCst) {
@@ -235,10 +269,20 @@ impl SdrSource for PlutoSource {
 
                             if let Err(e) = buffer.refill() {
                                 warn!("[pluto] Buffer refill error: {:?}", e);
+                                consecutive_refill_failures += 1;
+                                if consecutive_refill_failures >= MAX_CONSECUTIVE_REFILL_FAILURES {
+                                    warn!(
+                                        "[pluto] Buffer refill failed {} times consecutively on {} Hz; moving to next channel.",
+                                        consecutive_refill_failures, current_freq_hz
+                                    );
+                                    consecutive_failures += 1;
+                                    break;
+                                }
                                 thread::sleep(Duration::from_millis(1));
                                 last_refill_time = Instant::now();
                                 continue;
                             }
+                            consecutive_refill_failures = 0;
 
                             let now = Instant::now();
                             let overrun = if first_refill {
@@ -332,5 +376,34 @@ impl SdrSource for PlutoSource {
             stop,
             wait,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_pluto_config_rejects_empty_channels() {
+        let err = validate_pluto_config(0, 2_000_000.0).unwrap_err();
+        assert!(matches!(err, SdrError::BadConfig(_)));
+    }
+
+    #[test]
+    fn validate_pluto_config_rejects_non_positive_rate() {
+        assert!(validate_pluto_config(1, 0.0).is_err());
+        assert!(validate_pluto_config(1, -1.0).is_err());
+    }
+
+    #[test]
+    fn validate_pluto_config_accepts_rate_under_reliable_ceiling() {
+        let exceeds = validate_pluto_config(1, 2_000_000.0).unwrap();
+        assert!(!exceeds);
+    }
+
+    #[test]
+    fn validate_pluto_config_flags_rate_over_reliable_ceiling() {
+        let exceeds = validate_pluto_config(1, 10_000_000.0).unwrap();
+        assert!(exceeds);
     }
 }

@@ -46,4 +46,19 @@ Data is retrieved from the IIO buffer as 16-bit integers, though the AD9361 ADC 
 - If the elapsed time exceeds the duration of 3 buffers, it infers that the kernel's ring buffer (typically holding 4 buffers) has overflowed.
 - The `overrun` flag is dynamically set to `true` on the resulting `IqPacket`, alerting the downstream orchestrator.
 
+## 4. Failure Handling
+
+- **Refill failures.** A `buffer.refill()` error no longer spins silently:
+  each failure increments a per-dwell counter (backed off 1ms between
+  attempts), and after `MAX_CONSECUTIVE_REFILL_FAILURES` (200, ~200ms) the
+  backend gives up on the current channel, counts it as a tune/stream
+  failure for that sweep, and moves on.
+- **Sweep bailout.** If every channel in a sweep fails to tune or stream
+  (including via repeated refill failures above), the hop loop backs off
+  500ms and retries. After `MAX_CONSECUTIVE_SWEEP_FAILURES` (10) consecutive
+  failed sweeps — meaning the device has been unresponsive for at least
+  ~5 seconds — the capture thread gives up and exits instead of retrying
+  forever, so `SdrHandle::wait()` eventually returns for a Pluto that's
+  been unplugged or is unreachable over the network.
+
 

@@ -88,8 +88,20 @@ for packet in handle.receiver.iter() {
 - **MSRV:** This crate does not maintain an explicit Minimum Supported Rust Version (MSRV) policy and tracks the latest `stable` compiler.
 - **Semver:** This crate follows semantic versioning. While in `0.x.y`, breaking API changes will result in a minor version bump (e.g. `0.1.x` to `0.2.0`).
 
+## Errors
+
+`start()` validates `SourceConfig` — a non-empty `channels_hz` and a positive
+`sample_rate_hz` — before opening the Pluto, so a bad config returns
+`SdrError::BadConfig` without ever touching the device. Once streaming, a
+channel that fails to refill its buffer 200 times in a row (~200ms) is
+skipped in favor of the next channel; if every channel fails for 10
+consecutive sweeps (~5+ seconds of an unresponsive device), the capture
+thread gives up rather than retrying forever, and `SdrHandle::wait()`
+returns once that happens.
+
 ## Testing & Contributing
 
+4 unit tests cover the config validation and reliable-rate-ceiling check.
 Please see [CONTRIBUTING.md](CONTRIBUTING.md) for detailed instructions on running the test suite and formatting your code before submitting a Pull Request.
 
 ## Documentation
